@@ -1,13 +1,14 @@
-#include <WiFi.h>
-#include <WiFiMulti.h>
-#include <WiFiClientSecure.h>
+#include <WiFi.h>              // wifi connection to robot
+#include <WiFiMulti.h>         // wifi connection to robot
+#include <WiFiClientSecure.h>  // wifi connection to robot
 #include <Arduino.h>
-#include <WebSocketsClient.h>
-#include "soc/soc.h"           //disable brownout problems
-#include "soc/rtc_cntl_reg.h"  //disable brownout problems
-#include <Adafruit_GFX.h>
-#include <Adafruit_SSD1306.h>
-#include <Adafruit_MAX1704X.h>
+#include <WebSocketsClient.h>   // wifi connection to robot
+#include "soc/soc.h"            //disable brownout problems
+#include "soc/rtc_cntl_reg.h"   //disable brownout problems
+#include <Adafruit_GFX.h>       // display
+#include <Adafruit_SSD1306.h>   // display
+#include <Adafruit_MAX1704X.h>  // battery fuel gauge
+#include <Adafruit_BNO08x.h>    // IMU
 
 #define SDA_PIN 21
 #define SCL_PIN 22
@@ -29,14 +30,33 @@
 // #define TOUCH_PIN_3 13
 
 #define BUTTON_1 12
-#define BUTTON_2 13
-#define BUTTON_3 14
+#define BUTTON_2 14
+#define BUTTON_3 13
 #define BUTTON_4 16
 
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
 
 #define SSD1306_I2C_ADDRESS 0x3C
+
+// 9Dof
+#define BNO08X_RESET -1
+struct euler_t {
+  float yaw;
+  float pitch;
+  float roll;
+} ypr, yprStart, yprRequired;
+int last5yprYaws[5];
+unsigned long last5yprYawsTime[5];
+int yawCorrection = 0;
+Adafruit_BNO08x bno08x(BNO08X_RESET);
+sh2_SensorValue_t sensorValue;
+sh2_SensorId_t reportType = SH2_ARVR_STABILIZED_RV;
+long reportIntervalUs = 50000;
+bool run9Dof = false;
+bool is9DofConnected = false;
+TaskHandle_t taskCompassCheck;
+// 9Dof
 
 // Create the display object (width 128, height 64)
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire);
@@ -112,6 +132,8 @@ int lastRoviBatteryPercentage = 0;
 unsigned long gameOnOffLast = 0;
 TaskHandle_t gameTask;
 bool gameMode = false;
+bool gameModeSelection = false;
+int gameSelection = 0;
 int dinoY = SCREEN_HEIGHT - 20;  // Dino's initial vertical position
 int dinoJumpHeight = 13;         // Jump height
 int dinoWidth = 10, dinoHeight = 10;
@@ -124,6 +146,14 @@ int obstacleWidth = 10, obstacleHeight = 10;
 int obstacleSpeed = random(2, 5);
 
 int score = 0;
+
+
+
+float ballX = SCREEN_WIDTH / 2;  // Initial ball position (center)
+float ballY = SCREEN_HEIGHT / 2;
+float lastBallX = ballX;
+float lastBallY = ballY;
+int ballRadius = 4;  // Ball size
 // game stuff
 
 // menu
@@ -186,17 +216,6 @@ void setup() {
   //   while (1)
   //     ;
   // }
-  while (!max17048.begin(&Wire) && tryNum < 10) {
-    Serial.println("MAX17048 not detected. Check connections.");
-    tryNum++;
-    delay(500);
-  }
-  if (tryNum == 10) {
-    Serial.println("Failed to connect to MAX17048");
-  } else {
-    Serial.println("MAX17048 connected");
-  }
-  tryNum = 0;
 
   Serial.println("AAAAAAAA");
   // Serial.println(display.begin(SSD1306_SWITCHCAPVCC, SSD1306_I2C_ADDRESS));
@@ -225,6 +244,17 @@ void setup() {
     display.display();
   }
 
+  while (!max17048.begin() && tryNum < 10) {
+    Serial.println("MAX17048 not detected. Check connections.");
+    tryNum++;
+    delay(500);
+  }
+  if (tryNum == 10) {
+    Serial.println("Failed to connect to MAX17048");
+  } else {
+    Serial.println("MAX17048 connected");
+  }
+  tryNum = 0;
   // Initialize the display
 
 
@@ -252,12 +282,49 @@ void setup() {
   //   connectedToRoviProcedure();
   // }
 
+
+  attachInterrupt(digitalPinToInterrupt(BUTTON_1), BUTTON_1Change, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(BUTTON_2), BUTTON_2Change, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(BUTTON_3), BUTTON_3Change, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(BUTTON_4), BUTTON_4Change, CHANGE);
+
+  int compassStartI;
+  for (compassStartI = 0; !bno08x.begin_I2C(); compassStartI++) {
+    if (compassStartI > 10) {
+      break;
+    }
+    Serial.println("bno085 does not respond");
+    delay(500);
+  }
+  if (compassStartI <= 10) {  //  && zed_f9pReady != 0
+    Serial.println("BNO08x Found!");
+    setReports(reportType, reportIntervalUs);
+    is9DofConnected = true;
+    run9Dof = true;
+    // xTaskCreatePinnedToCore(compassCheck, "taskCompassCheck", 8192, NULL, 1, &taskCompassCheck, 0);
+  }
   xTaskCreatePinnedToCore(everyTenSecondsLoop, "everyTenSecondsTask", 4096, NULL, 1, &everyTenSecondsTask, 0);
   xTaskCreatePinnedToCore(everySecondLoop, "everySecondTask", 4096, NULL, 1, &everySecondTask, 0);
   xTaskCreatePinnedToCore(everyFortyMillisLoop, "everyFortyMillisLoop", 4096, NULL, 1, &everyFortyMillisTask, 0);
 }
 
-void gameLoop(void* parameter) {
+void BUTTON_1Change() {
+  myButtonsState.A = !digitalRead(BUTTON_1);
+}
+
+void BUTTON_2Change() {
+  myButtonsState.B = !digitalRead(BUTTON_2);
+}
+
+void BUTTON_3Change() {
+  myButtonsState.X = !digitalRead(BUTTON_3);
+}
+
+void BUTTON_4Change() {
+  myButtonsState.Y = !digitalRead(BUTTON_4);
+}
+
+void dinoGameLoop(void* parameter) {
   for (;;) {
     // display.fillRect(0, 10, 128, 128, SH110X_BLACK);
 
@@ -301,7 +368,7 @@ void gameLoop(void* parameter) {
 
     // Collision detection
     if (obstacleX < dinoWidth && obstacleX + obstacleWidth > 0 && dinoY + dinoHeight > obstacleY) {
-      gameOver();
+      dinoGameOver();
       // vTaskDelay(3500 / portTICK_PERIOD_MS);
     } else {
       // Draw dino
@@ -340,11 +407,11 @@ void gameLoop(void* parameter) {
     // if(score > 25){
     //   timeDelay = 20;
     // }
-    vTaskDelay(40 - score / 3 / portTICK_PERIOD_MS);
+    vTaskDelay(40 - score / 2 / portTICK_PERIOD_MS);
   }
 }
 
-void gameOver() {
+void dinoGameOver() {
   display.fillRect(0, 10, SCREEN_WIDTH, SCREEN_HEIGHT, SSD1306_BLACK);  // Clear area for dynamic text
   display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
@@ -357,6 +424,7 @@ void gameOver() {
   delay(3000);
 
   // Reset game
+  isJumping = false;
   jumpCounter = 0;
   dinoY = SCREEN_HEIGHT - 20;
   obstacleX = SCREEN_HEIGHT;
@@ -376,26 +444,32 @@ void everyFortyMillisLoop(void* parameter) {
     if (isConnectedToRovi || true) {
       sendJoystickData();
     }
-    myButtonsState.A  = !digitalRead(BUTTON_1);
-    myButtonsState.B = !digitalRead(BUTTON_2);
-    myButtonsState.X= !digitalRead(BUTTON_3);
-    myButtonsState.Y = !digitalRead(BUTTON_4);
+    // myButtonsState.A  = !digitalRead(BUTTON_1);
+    // myButtonsState.B = !digitalRead(BUTTON_2);
+    // myButtonsState.X= !digitalRead(BUTTON_3);
+    // myButtonsState.Y = !digitalRead(BUTTON_4);
+    compassCheck();
     if (isDisplayConnected && !gameMode) {
-      display.fillRect(0, 10, 120, 64, SSD1306_BLACK);  // Clear area for dynamic text
-
-      display.setTextSize(3);                // Larger text for dynamic part
-      display.setCursor(0, 15);              // Position for dynamic text
-      display.println(myJoysticksState.Ly);  // Print the current value
-      display.print(myJoysticksState.Ry);    // Print the current value
-      // display.println(A);  // Print the current value
-      // display.print(B);    // Print the current value
-
-      display.display();  // Push to the display
+      drawDefaultUI();
     }
-
+    if (gameMode && gameSelection ==2) {
+      gyroGameLoop();
+    }
     if (myButtonsState.A) {
       if (!gameMode) {
         analogWrite(VMOTOR1, 5);
+      } else {
+        if (gameModeSelection && gameOnOffLast+2000 < millis()) {
+          gameSelection = 1;
+          gameModeSelection = false;
+          display.fillRect(0, 10, SCREEN_WIDTH, SCREEN_HEIGHT, SSD1306_BLACK);
+          display.setTextSize(1);
+          // display.setTextColor(SSD1306_WHITE);
+          // display.setCursor(0, 10);
+          // display.print("Score: ");
+          display.display();
+          xTaskCreatePinnedToCore(dinoGameLoop, "dinoGameLoop", 4096, NULL, 1, &gameTask, 0);
+        }
       }
     } else {
       analogWrite(VMOTOR1, 0);
@@ -403,6 +477,12 @@ void everyFortyMillisLoop(void* parameter) {
     if (myButtonsState.B) {
       if (!gameMode) {
         analogWrite(VMOTOR2, 5);
+      }
+      if (gameModeSelection && gameOnOffLast+2000 < millis()) {
+        display.fillRect(0, 10, SCREEN_WIDTH, SCREEN_HEIGHT, SSD1306_BLACK);
+        display.display();
+        gameSelection = 2;
+        gameModeSelection = false;
       }
     } else {
       analogWrite(VMOTOR2, 0);
@@ -414,6 +494,12 @@ void everyFortyMillisLoop(void* parameter) {
         if (roviGear > 3) {
           roviGear = 1;
         }
+      }
+      if (gameModeSelection && gameOnOffLast+2000 < millis()) {
+        gameMode = false;
+        gameModeSelection = false;
+        display.fillRect(0, 10, SCREEN_WIDTH, SCREEN_HEIGHT, SSD1306_BLACK);
+        display.display();
       }
     } else {
       analogWrite(VMOTOR3, 0);
@@ -428,21 +514,20 @@ void everyFortyMillisLoop(void* parameter) {
     if (myButtonsState.A && myButtonsState.B && myButtonsState.X && millis() - gameOnOffLast > 5000) {
       if (!gameMode) {
         Serial.println("starting game mode");
-        display.fillRect(0, 10, SCREEN_WIDTH, SCREEN_HEIGHT, SSD1306_BLACK);
-        display.setTextSize(1);
-        // display.setTextColor(SSD1306_WHITE);
-        // display.setCursor(0, 10);
-        // display.print("Score: ");
-        display.display();
-        xTaskCreatePinnedToCore(gameLoop, "gameLoop", 4096, NULL, 1, &gameTask, 0);
         gameMode = true;
+        gameModeSelection = true;
+        gameSelectionUI();
       } else {
-        vTaskDelete(gameTask);
+        if (gameSelection == 1) {
+          vTaskDelete(gameTask);
+          dinoY = SCREEN_HEIGHT - 20;
+          obstacleX = SCREEN_WIDTH;
+          score = 0;
+          jumpCounter = 0;
+        }
+        gameSelection = 0;
         gameMode = false;
-        dinoY = SCREEN_HEIGHT - 20;
-        obstacleX = SCREEN_WIDTH;
-        score = 0;
-        jumpCounter = 0;
+        gameModeSelection = false;
         display.fillRect(0, 10, SCREEN_WIDTH, SCREEN_HEIGHT, SSD1306_BLACK);  // Clear area for dynamic text
         display.display();
       }
@@ -454,6 +539,109 @@ void everyFortyMillisLoop(void* parameter) {
       vTaskDelay(delay / portTICK_PERIOD_MS);
     }
   }
+}
+
+void drawDefaultUI() {
+  display.fillRect(80, 10, SCREEN_WIDTH, 40, SSD1306_BLACK);  // Clear area for dynamic text
+  display.setTextSize(1);
+  display.setCursor(80, 13);
+  display.print((int)ypr.yaw);
+  display.setCursor(80, 23);
+  display.print((int)ypr.pitch);
+  display.setCursor(80, 33);
+  display.print((int)ypr.roll);
+  display.fillRect(0, 15, 80, 60, SSD1306_BLACK);  // Clear area for dynamic text
+
+  display.setTextSize(3);                // Larger text for dynamic part
+  display.setCursor(0, 15);              // Position for dynamic text
+  display.println(myJoysticksState.Ly);  // Print the current value
+  display.print(myJoysticksState.Ry);    // Print the current value
+  // display.println(A);  // Print the current value
+  // display.print(B);    // Print the current value
+
+  display.display();  // Push to the display
+}
+
+void gameSelectionUI() {
+  display.fillRect(0, 10, SCREEN_WIDTH, SCREEN_HEIGHT, SSD1306_BLACK);  // Clear area for dynamic text
+  display.setTextSize(1);
+  display.setCursor(0, 15);
+  display.print("Game Selection");
+  display.setCursor(0, 25);
+  display.print("1. Dino");
+  display.setCursor(0, 35);
+  display.print("2. Ball");
+  display.setCursor(0, 45);
+  display.print("3. Exit");
+  display.display();
+}
+
+void setReports(sh2_SensorId_t reportType, long report_interval) {
+  Serial.println("Setting desired reports");
+  if (!bno08x.enableReport(reportType, report_interval)) {
+    Serial.println("Could not enable stabilized remote vector");
+  }
+  // if (!bno08x.enableReport(SH2_PICKUP_DETECTOR, report_interval)) {
+  //   Serial.println("Could not enable SH2_PICKUP_DETECTOR");
+  // }
+  // if (!bno08x.enableReport(SH2_LINEAR_ACCELERATION, report_interval)) {
+  //   Serial.println("Could not enable SH2_PICKUP_DETECTOR");
+  // }
+}
+
+void quaternionToEuler(float qr, float qi, float qj, float qk, euler_t* ypr, bool degrees = false) {
+
+  float sqr = sq(qr);
+  float sqi = sq(qi);
+  float sqj = sq(qj);
+  float sqk = sq(qk);
+
+  ypr->yaw = atan2(2.0 * (qi * qj + qk * qr), (sqi - sqj - sqk + sqr));
+  ypr->pitch = asin(-2.0 * (qi * qk - qj * qr) / (sqi + sqj + sqk + sqr));
+  ypr->roll = atan2(2.0 * (qj * qk + qi * qr), (-sqi - sqj + sqk + sqr));
+
+  if (degrees) {
+    ypr->yaw *= RAD_TO_DEG;
+    ypr->pitch *= RAD_TO_DEG;
+    ypr->roll *= RAD_TO_DEG;
+    // ypr->yaw += 180;                           // make it from -180 - 180 to 0 - 360
+    // ypr->yaw = map(ypr->yaw, 0, 360, 360, 0);  // and reverse it
+  }
+}
+
+void quaternionToEulerRV(sh2_RotationVectorWAcc_t* rotational_vector, euler_t* ypr, bool degrees = false) {
+  quaternionToEuler(rotational_vector->real, rotational_vector->i, rotational_vector->j, rotational_vector->k, ypr, degrees);
+}
+
+void compassCheck() {
+  if (bno08x.wasReset()) {
+    Serial.print("sensor was reset ");
+    setReports(reportType, reportIntervalUs);
+  }
+
+  if (bno08x.getSensorEvent(&sensorValue)) {
+    switch (sensorValue.sensorId) {
+      case SH2_ARVR_STABILIZED_RV:
+        for (int i = 1; i < 5; i++) {
+          last5yprYaws[i] = last5yprYaws[i - 1];
+          last5yprYawsTime[i] = last5yprYawsTime[i - 1];
+        }
+        last5yprYaws[0] = (int)ypr.yaw;
+        last5yprYawsTime[0] = millis();
+        quaternionToEulerRV(&sensorValue.un.arvrStabilizedRV, &ypr, true);
+        Serial.print("yaw: ");
+        Serial.print(ypr.yaw);
+        Serial.print(", pitch: ");
+        Serial.print(ypr.pitch);
+        Serial.print(", roll: ");
+        Serial.println(ypr.roll);
+        break;
+      default:
+        Serial.println("default");
+        break;
+    }
+  }
+  return;
 }
 
 void everySecondLoop(void* parameter) {
@@ -503,9 +691,9 @@ void everySecondLoop(void* parameter) {
 
     // Get state of charge (SOC)
     int soc = max17048.cellPercent();
-    // Serial.print("State of Charge: ");
-    // Serial.print(soc);
-    // Serial.println(" %");
+    Serial.print("State of Charge: ");
+    Serial.print(soc);
+    Serial.println(" %");
     soc = map(soc, 0, 100, -8, 105);
     if (soc > 100) {
       soc = 100;
@@ -631,24 +819,24 @@ void connectedToRoviProcedure() {
   taskParams->vMotor4 = true;
   taskParams->duration = 300;
 
-  xTaskCreatePinnedToCore(vibrationMotorsTaskLoop, "vibrationMotorsTask", 4096, taskParams, 1, &vibrationMotorsTask, 0);
+  xTaskCreatePinnedToCore(vibrationMotorsTaskMethod, "vibrationMotorsTask", 4096, taskParams, 1, &vibrationMotorsTask, 0);
 
   Serial.println("ready to go");
 }
 
-void vibrationMotorsTaskLoop(void* parameter) {
+void vibrationMotorsTaskMethod(void* parameter) {
   vibrationMotorsTaskParameters* params = (vibrationMotorsTaskParameters*)parameter;
   if (params->vMotor1) {
-    analogWrite(VMOTOR1, 5);
+    analogWrite(VMOTOR1, 10);
   }
   if (params->vMotor2) {
-    analogWrite(VMOTOR2, 5);
+    analogWrite(VMOTOR2, 10);
   }
   if (params->vMotor3) {
-    analogWrite(VMOTOR3, 5);
+    analogWrite(VMOTOR3, 10);
   }
   if (params->vMotor4) {
-    analogWrite(VMOTOR4, 5);
+    analogWrite(VMOTOR4, 10);
   }
   vTaskDelay(params->duration / portTICK_PERIOD_MS);
   analogWrite(VMOTOR1, 0);
@@ -765,7 +953,7 @@ void updateJoysticks() {
   if (myJoysticksState.Ry > 2000) {
     myJoysticksState.Ry = (myJoysticksState.Ry > 3600) ? -255 : map(pow(myJoysticksState.Ry / 10, 2) / 100, 400, 1296, -10, -255);
   } else if (myJoysticksState.Ry < 1800) {
-    myJoysticksState.Ry = (myJoysticksState.Ry < 400) ? 255 : map(pow(map(myJoysticksState.Ry, 1800, 400, 200, 360), 2)/100, 400, 1296, 10, 255);  // pow(map(myJoysticksState.Ry, 1800, 400, 200, 360), 2)/100, 400, 1296, -10, -255
+    myJoysticksState.Ry = (myJoysticksState.Ry < 400) ? 255 : map(pow(map(myJoysticksState.Ry, 1800, 400, 200, 360), 2) / 100, 400, 1296, 10, 255);  // pow(map(myJoysticksState.Ry, 1800, 400, 200, 360), 2)/100, 400, 1296, -10, -255
   } else {
     myJoysticksState.Ry = 0;
   }
@@ -779,9 +967,9 @@ void updateJoysticks() {
   }
 
   if (myJoysticksState.Ly > 2000) {
-    myJoysticksState.Ly = (myJoysticksState.Ly > 3600) ? -255 : map(pow(myJoysticksState.Ly/10, 2)/100, 400, 1296, -10, -255); // map(myJoysticksState.Ly, 2000, 3600, 10, 255)
+    myJoysticksState.Ly = (myJoysticksState.Ly > 3600) ? -255 : map(pow(myJoysticksState.Ly / 10, 2) / 100, 400, 1296, -10, -255);  // map(myJoysticksState.Ly, 2000, 3600, 10, 255)
   } else if (myJoysticksState.Ly < 1800) {
-    myJoysticksState.Ly = (myJoysticksState.Ly < 400) ? 255 : map(pow(map(myJoysticksState.Ly, 1800, 400, 200, 360), 2)/100, 400, 1296, 10,255); // map(myJoysticksState.Ly, 1800, 400, -10, -255)
+    myJoysticksState.Ly = (myJoysticksState.Ly < 400) ? 255 : map(pow(map(myJoysticksState.Ly, 1800, 400, 200, 360), 2) / 100, 400, 1296, 10, 255);  // map(myJoysticksState.Ly, 1800, 400, -10, -255)
   } else {
     myJoysticksState.Ly = 0;
   }
@@ -875,4 +1063,35 @@ void webSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
     case WStype_FRAGMENT_FIN:
       break;
   }
+}
+
+void gyroGameLoop() {
+  // Calculate ball position based on tilt angles
+  float xOffset = (ypr.roll * 0.35);    // Scale roll value to fit screen width
+  float yOffset = (ypr.pitch * -0.35);  // Scale pitch value to fit screen height
+
+  // Apply offsets to center position
+  lastBallX = ballX;
+  lastBallY = ballY;
+  ballX = ballX + xOffset;
+  ballY = ballY + yOffset;
+
+  // Keep ball within screen boundaries
+  if (ballX < ballRadius) {
+    ballX = ballRadius;
+  }
+  if (ballX > SCREEN_WIDTH - ballRadius) {
+    ballX = SCREEN_WIDTH - ballRadius;
+  }
+  if (ballY < ballRadius) {
+    ballY = ballRadius;
+  }
+  if (ballY > SCREEN_HEIGHT - ballRadius) {
+    ballY = SCREEN_HEIGHT - ballRadius;
+  }
+  display.fillCircle((int)lastBallX, (int)lastBallY, ballRadius, SSD1306_BLACK);
+  display.fillCircle((int)ballX, (int)ballY, ballRadius, SSD1306_WHITE);
+
+  // Update display
+  display.display();
 }
