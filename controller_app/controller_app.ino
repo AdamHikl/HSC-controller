@@ -256,7 +256,14 @@ void setup() {
   }
   tryNum = 0;
   // Initialize the display
+  vibrationMotorsTaskParameters* taskParams = new vibrationMotorsTaskParameters;
+  taskParams->vMotor1 = true;
+  taskParams->vMotor2 = true;
+  taskParams->vMotor3 = true;
+  taskParams->vMotor4 = true;
+  taskParams->duration = 300;
 
+  xTaskCreatePinnedToCore(vibrationMotorsTaskMethod, "vibrationMotorsTask", 1024, taskParams, 1, &vibrationMotorsTask, 0);
 
   // WiFi.begin(ssid, password);
   // delay(500);
@@ -819,7 +826,7 @@ void connectedToRoviProcedure() {
   taskParams->vMotor4 = true;
   taskParams->duration = 300;
 
-  xTaskCreatePinnedToCore(vibrationMotorsTaskMethod, "vibrationMotorsTask", 4096, taskParams, 1, &vibrationMotorsTask, 0);
+  xTaskCreatePinnedToCore(vibrationMotorsTaskMethod, "vibrationMotorsTask", 1024, taskParams, 1, &vibrationMotorsTask, 0);
 
   Serial.println("ready to go");
 }
@@ -945,7 +952,7 @@ void updateJoysticks() {
   if (myJoysticksState.Rx > 2000) {
     myJoysticksState.Rx = (myJoysticksState.Rx > 3600) ? -255 : map(myJoysticksState.Rx, 2000, 3600, -10, -255);
   } else if (myJoysticksState.Rx < 1800) {
-    myJoysticksState.Rx = (myJoysticksState.Rx < 400) ? 255 : map(myJoysticksState.Rx, 1800, 400, 10, 255);
+    myJoysticksState.Rx = (myJoysticksState.Rx < 410) ? 255 : map(myJoysticksState.Rx, 1800, 400, 10, 255);
   } else {
     myJoysticksState.Rx = 0;
   }
@@ -953,7 +960,7 @@ void updateJoysticks() {
   if (myJoysticksState.Ry > 2000) {
     myJoysticksState.Ry = (myJoysticksState.Ry > 3600) ? -255 : map(pow(myJoysticksState.Ry / 10, 2) / 100, 400, 1296, -10, -255);
   } else if (myJoysticksState.Ry < 1800) {
-    myJoysticksState.Ry = (myJoysticksState.Ry < 400) ? 255 : map(pow(map(myJoysticksState.Ry, 1800, 400, 200, 360), 2) / 100, 400, 1296, 10, 255);  // pow(map(myJoysticksState.Ry, 1800, 400, 200, 360), 2)/100, 400, 1296, -10, -255
+    myJoysticksState.Ry = (myJoysticksState.Ry < 410) ? 255 : map(pow(map(myJoysticksState.Ry, 1800, 400, 200, 360), 2) / 100, 400, 1296, 10, 255);  // pow(map(myJoysticksState.Ry, 1800, 400, 200, 360), 2)/100, 400, 1296, -10, -255
   } else {
     myJoysticksState.Ry = 0;
   }
@@ -961,7 +968,7 @@ void updateJoysticks() {
   if (myJoysticksState.Lx > 2050) {
     myJoysticksState.Lx = (myJoysticksState.Lx > 3600) ? -255 : map(myJoysticksState.Lx, 2050, 3600, -10, -255);
   } else if (myJoysticksState.Lx < 1800) {
-    myJoysticksState.Lx = (myJoysticksState.Lx < 400) ? 255 : map(myJoysticksState.Lx, 1800, 400, 10, 255);
+    myJoysticksState.Lx = (myJoysticksState.Lx < 410) ? 255 : map(myJoysticksState.Lx, 1800, 400, 10, 255);
   } else {
     myJoysticksState.Lx = 0;
   }
@@ -969,7 +976,7 @@ void updateJoysticks() {
   if (myJoysticksState.Ly > 2000) {
     myJoysticksState.Ly = (myJoysticksState.Ly > 3600) ? -255 : map(pow(myJoysticksState.Ly / 10, 2) / 100, 400, 1296, -10, -255);  // map(myJoysticksState.Ly, 2000, 3600, 10, 255)
   } else if (myJoysticksState.Ly < 1800) {
-    myJoysticksState.Ly = (myJoysticksState.Ly < 400) ? 255 : map(pow(map(myJoysticksState.Ly, 1800, 400, 200, 360), 2) / 100, 400, 1296, 10, 255);  // map(myJoysticksState.Ly, 1800, 400, -10, -255)
+    myJoysticksState.Ly = (myJoysticksState.Ly < 410) ? 255 : map(pow(map(myJoysticksState.Ly, 1800, 400, 200, 360), 2) / 100, 400, 1296, 10, 255);  // map(myJoysticksState.Ly, 1800, 400, -10, -255)
   } else {
     myJoysticksState.Ly = 0;
   }
