@@ -2,13 +2,14 @@
 #include <WiFiMulti.h>         // wifi connection to robot
 #include <WiFiClientSecure.h>  // wifi connection to robot
 #include <Arduino.h>
-#include <WebSocketsClient.h>   // wifi connection to robot
-#include "soc/soc.h"            //disable brownout problems
-#include "soc/rtc_cntl_reg.h"   //disable brownout problems
+#include <WebSocketsClient.h>  // wifi connection to robot
+// #include "soc/soc.h"            //disable brownout problems
+// #include "soc/rtc_cntl_reg.h"   //disable brownout problems
 #include <Adafruit_GFX.h>       // display
 #include <Adafruit_SSD1306.h>   // display
 #include <Adafruit_MAX1704X.h>  // battery fuel gauge
 #include <Adafruit_BNO08x.h>    // IMU
+#include <TTS.h>                // text to speech library
 
 #define SDA_PIN 21
 #define SCL_PIN 22
@@ -25,9 +26,12 @@
 #define VMOTOR3 4
 #define VMOTOR4 23
 
-// #define TOUCH_PIN_1 14
-// #define TOUCH_PIN_2 12
-// #define TOUCH_PIN_3 13
+#define VMOTOR1_CHANNEL 0
+#define VMOTOR2_CHANNEL 1
+#define VMOTOR3_CHANNEL 2
+#define VMOTOR4_CHANNEL 3
+#define SPEAKERL_CHANNEL 4
+#define SPEAKERR_CHANNEL 5
 
 #define BUTTON_1 12
 #define BUTTON_2 14
@@ -37,7 +41,7 @@
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
 
-#define SSD1306_I2C_ADDRESS 0x3C
+#define SSD1306_I2C_ADDRESS 0x3C  // display adress
 
 // 9Dof
 #define BNO08X_RESET -1
@@ -57,6 +61,50 @@ bool run9Dof = false;
 bool is9DofConnected = false;
 TaskHandle_t taskCompassCheck;
 // 9Dof
+
+// MUSIC
+#define SPEAKER_LEFT 25
+#define SPEAKER_RIGHT 26
+
+TTS text2speech(SPEAKER_LEFT);  // to enable both speakers, you need to go to the sound.cpp file in TTS library and adjust the code - I will video tutorial soon
+
+TaskHandle_t playImperialMarchTask;
+TaskHandle_t playFuturisticSoundTask;
+TaskHandle_t saySomeWordsTask;
+
+#define NOTE_A4 440
+#define NOTE_F4 349
+#define NOTE_C5 523
+#define NOTE_E5 659
+#define NOTE_F5 698
+#define NOTE_GS4 415
+
+int melody[] = {
+  NOTE_A4, NOTE_A4, NOTE_A4, NOTE_F4, NOTE_C5, NOTE_A4,
+  NOTE_F4, NOTE_C5, NOTE_A4,
+  NOTE_E5, NOTE_E5, NOTE_E5,
+  NOTE_F5, NOTE_C5, NOTE_GS4, NOTE_F4,
+  NOTE_A4, NOTE_A4, NOTE_A4,
+  NOTE_F4, NOTE_C5, NOTE_A4,
+  NOTE_F4, NOTE_C5, NOTE_A4
+};
+
+int noteDurations[] = {
+  500, 500, 500,
+  350, 150, 500,
+  350, 150, 650,
+  500, 500, 500,
+  350, 150, 500, 350, 150, 650,
+  500, 500, 500,
+  350, 150, 500,
+  350, 150, 650
+};
+
+// const int pwmChannel1 = 0; // For pin 25
+// const int pwmChannel2 = 1; // For pin 26
+const int pwmResolution = 8;   //
+const int pwmBaseFreq = 5000;  // Default frequency (overwritten later)
+// MUSIC
 
 // Create the display object (width 128, height 64)
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire);
@@ -157,25 +205,50 @@ int ballRadius = 4;  // Ball size
 // game stuff
 
 // menu
+const char* menuItems[] = {
+  "Dino game",
+  "Ball game",
+  "Music",
+  "Text To Speech",
+  "Emoji",
+  "Exit"
+};
 
-const char* menuItems[] = { "Option 1", "Option 2", "Option 3", "Exit" };
-bool menuStates[] = { false, false, false };  // Store toggle states for options
 int menuSize = sizeof(menuItems) / sizeof(menuItems[0]);
-int selectedMenuItem = 0;
-
+int selectedItem = 0;
+int topItem = 0;
+// menu
 
 void setup() {
-  pinMode(VMOTOR1, OUTPUT);
-  pinMode(VMOTOR2, OUTPUT);
-  pinMode(VMOTOR3, OUTPUT);
-  pinMode(VMOTOR4, OUTPUT);
 
-  analogWrite(VMOTOR1, 0);
-  analogWrite(VMOTOR2, 0);
-  analogWrite(VMOTOR3, 0);
-  analogWrite(VMOTOR4, 0);
+  ledcSetup(SPEAKERL_CHANNEL, pwmBaseFreq, pwmResolution);
+  ledcAttachPin(SPEAKER_LEFT, SPEAKERL_CHANNEL);
 
-  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);  //disable brownout detector
+  ledcSetup(SPEAKERR_CHANNEL, pwmBaseFreq, pwmResolution);
+  ledcAttachPin(SPEAKER_RIGHT, SPEAKERR_CHANNEL);
+
+  ledcSetup(VMOTOR1_CHANNEL, pwmBaseFreq, pwmResolution);
+  ledcAttachPin(VMOTOR1, VMOTOR1_CHANNEL);
+
+  ledcSetup(VMOTOR2_CHANNEL, pwmBaseFreq, pwmResolution);
+  ledcAttachPin(VMOTOR2, VMOTOR2_CHANNEL);
+
+  ledcSetup(VMOTOR3_CHANNEL, pwmBaseFreq, pwmResolution);
+  ledcAttachPin(VMOTOR3, VMOTOR3_CHANNEL);
+
+  ledcSetup(VMOTOR4_CHANNEL, pwmBaseFreq, pwmResolution);
+  ledcAttachPin(VMOTOR4, VMOTOR4_CHANNEL);
+
+  ledcWrite(SPEAKERL_CHANNEL, 0);
+  ledcWrite(SPEAKERR_CHANNEL, 0);
+  ledcWrite(VMOTOR1_CHANNEL, 0);
+  ledcWrite(VMOTOR2_CHANNEL, 0);
+  ledcWrite(VMOTOR3_CHANNEL, 0);
+  ledcWrite(VMOTOR4_CHANNEL, 0);
+
+  xTaskCreatePinnedToCore(playFuturisticSound, "playFuturisticSoundTask", 1024, NULL, 1, &playFuturisticSoundTask, 0);
+
+  // WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);  //disable brownout detector
   Serial.begin(115200);
   Serial.setDebugOutput(true);
   //
@@ -205,8 +278,8 @@ void setup() {
   // myJoysticksAxisEnabled.Rx = true; // enable which joysticks you want to use (just a formality)
   // myJoysticksAxisEnabled.Lx = true; // enable which joysticks you want to use (just a formality)
 
-  // myJoysticksAxisEnabled.Rz = true; // enable which joysticks you want to use (just a formality)
-  // myJoysticksAxisEnabled.Lz = true; // enable which joysticks you want to use (just a formality)
+  myJoysticksAxisEnabled.Rz = true; // enable which joysticks you want to use (just a formality)
+  myJoysticksAxisEnabled.Lz = true; // enable which joysticks you want to use (just a formality)
 
   Wire.begin(SDA_PIN, SCL_PIN, 100000);
   int tryNum = 0;
@@ -256,14 +329,15 @@ void setup() {
   }
   tryNum = 0;
   // Initialize the display
-  vibrationMotorsTaskParameters* taskParams = new vibrationMotorsTaskParameters;
-  taskParams->vMotor1 = true;
-  taskParams->vMotor2 = true;
-  taskParams->vMotor3 = true;
-  taskParams->vMotor4 = true;
-  taskParams->duration = 300;
 
-  xTaskCreatePinnedToCore(vibrationMotorsTaskMethod, "vibrationMotorsTask", 1024, taskParams, 1, &vibrationMotorsTask, 0);
+  // vibrationMotorsTaskParameters* taskParams = new vibrationMotorsTaskParameters;
+  // taskParams->vMotor1 = true;
+  // taskParams->vMotor2 = true;
+  // taskParams->vMotor3 = true;
+  // taskParams->vMotor4 = true;
+  // taskParams->duration = 300;
+  //
+  // xTaskCreatePinnedToCore(vibrationMotorsTaskMethod, "vibrationMotorsTask", 1024, taskParams, 1, &vibrationMotorsTask, 0);
 
   // WiFi.begin(ssid, password);
   // delay(500);
@@ -459,66 +533,118 @@ void everyFortyMillisLoop(void* parameter) {
     if (isDisplayConnected && !gameMode) {
       drawDefaultUI();
     }
-    if (gameMode && gameSelection ==2) {
+    if (gameMode && gameSelection == 2) {
       gyroGameLoop();
     }
     if (myButtonsState.A) {
       if (!gameMode) {
-        analogWrite(VMOTOR1, 5);
+        ledcWrite(VMOTOR1_CHANNEL, 15);
       } else {
-        if (gameModeSelection && gameOnOffLast+2000 < millis()) {
-          gameSelection = 1;
+        if (gameModeSelection && gameOnOffLast + 1000 < millis()) {
+          // gameSelection = 1;
+          // gameModeSelection = false;
+          // display.fillRect(0, 10, SCREEN_WIDTH, SCREEN_HEIGHT, SSD1306_BLACK);
+          // display.setTextSize(1);
+          // // display.setTextColor(SSD1306_WHITE);
+          // // display.setCursor(0, 10);
+          // // display.print("Score: ");
+          // display.display();
+          // xTaskCreatePinnedToCore(dinoGameLoop, "dinoGameLoop", 4096, NULL, 1, &gameTask, 0);
+          gameMode = false;
           gameModeSelection = false;
-          display.fillRect(0, 10, SCREEN_WIDTH, SCREEN_HEIGHT, SSD1306_BLACK);
-          display.setTextSize(1);
-          // display.setTextColor(SSD1306_WHITE);
-          // display.setCursor(0, 10);
-          // display.print("Score: ");
+          display.fillRect(0, 0, 100, SCREEN_HEIGHT, SSD1306_BLACK);
           display.display();
-          xTaskCreatePinnedToCore(dinoGameLoop, "dinoGameLoop", 4096, NULL, 1, &gameTask, 0);
         }
       }
     } else {
-      analogWrite(VMOTOR1, 0);
+      ledcWrite(VMOTOR1_CHANNEL, 0);
     }
     if (myButtonsState.B) {
       if (!gameMode) {
-        analogWrite(VMOTOR2, 5);
+        ledcWrite(VMOTOR2_CHANNEL, 15);
       }
-      if (gameModeSelection && gameOnOffLast+2000 < millis()) {
-        display.fillRect(0, 10, SCREEN_WIDTH, SCREEN_HEIGHT, SSD1306_BLACK);
+      if (gameModeSelection && gameOnOffLast + 1000 < millis()) {
+        // display.fillRect(0, 10, SCREEN_WIDTH, SCREEN_HEIGHT, SSD1306_BLACK);
+        // display.display();
+        // gameSelection = 2;
+        // gameModeSelection = false;
+        display.fillRect(0, 0, 100, SCREEN_HEIGHT, SSD1306_BLACK);
         display.display();
-        gameSelection = 2;
+        switch (selectedItem) {
+          case 0:
+            gameSelection = 1;
+            xTaskCreatePinnedToCore(dinoGameLoop, "dinoGameLoop", 4096, NULL, 1, &gameTask, 0);
+            break;
+          case 1:
+            gameSelection = 2;
+            break;
+          case 2:
+            xTaskCreatePinnedToCore(playImperialMarch, "playImperialMarchTask", 1024, NULL, 1, &playImperialMarchTask, 0);
+            gameMode = false;
+            break;
+          case 3:
+            xTaskCreatePinnedToCore(saySomeWords, "saySomeWordsTask", 4096, NULL, 1, &saySomeWordsTask, 0);
+            gameMode = false;
+            break;
+          case 4:
+            // statements
+            drawHappyFace();
+            break;
+          case 5:
+            // statements
+            gameMode = false;
+            break;
+          default:
+            // statements
+            break;
+        }
         gameModeSelection = false;
       }
     } else {
-      analogWrite(VMOTOR2, 0);
+      ledcWrite(VMOTOR2_CHANNEL, 0);
     }
     if (myButtonsState.X) {
       if (!gameMode) {
-        analogWrite(VMOTOR3, 5);
+        ledcWrite(VMOTOR3_CHANNEL, 15);
         roviGear++;
         if (roviGear > 3) {
           roviGear = 1;
         }
       }
-      if (gameModeSelection && gameOnOffLast+2000 < millis()) {
-        gameMode = false;
-        gameModeSelection = false;
-        display.fillRect(0, 10, SCREEN_WIDTH, SCREEN_HEIGHT, SSD1306_BLACK);
-        display.display();
+      if (gameModeSelection && gameOnOffLast + 1000 < millis()) {
+        gameOnOffLast = millis() - 500;
+        selectedItem = (selectedItem + 1) % menuSize;
+        adjustMenu();
+        gameSelectionUI();
+        // xTaskCreatePinnedToCore(playImperialMarch, "playImperialMarchTask", 1024, NULL, 1, &playImperialMarchTask, 0);
+        // gameMode = false;
+        // gameModeSelection = false;
+        // display.fillRect(0, 10, SCREEN_WIDTH, SCREEN_HEIGHT, SSD1306_BLACK);
+        // display.display();
       }
     } else {
-      analogWrite(VMOTOR3, 0);
+      ledcWrite(VMOTOR3_CHANNEL, 0);
     }
     if (myButtonsState.Y) {
       if (!gameMode) {
-        analogWrite(VMOTOR4, 5);
+        ledcWrite(VMOTOR4_CHANNEL, 15);
+      }
+      if (gameModeSelection && gameOnOffLast + 1000 < millis()) {
+        gameOnOffLast = millis() - 500;
+        selectedItem = (selectedItem - 1 + menuSize) % menuSize;
+        adjustMenu();
+        gameSelectionUI();
+        // gameMode = false;
+        // gameModeSelection = false;
+        // display.fillRect(0, 10, SCREEN_WIDTH, SCREEN_HEIGHT, SSD1306_BLACK);
+        // display.display();
       }
     } else {
-      analogWrite(VMOTOR4, 0);
+      ledcWrite(VMOTOR4_CHANNEL, 0);
     }
-    if (myButtonsState.A && myButtonsState.B && myButtonsState.X && millis() - gameOnOffLast > 5000) {
+    if (myButtonsState.A && myButtonsState.B && myButtonsState.X && millis() - gameOnOffLast > 2000) {
+      display.clearDisplay();
+      display.display();
       if (!gameMode) {
         Serial.println("starting game mode");
         gameMode = true;
@@ -569,17 +695,31 @@ void drawDefaultUI() {
   display.display();  // Push to the display
 }
 
+void adjustMenu() {
+  if (selectedItem < topItem) {
+    topItem = selectedItem;
+  } else if (selectedItem >= topItem + 6) {
+    topItem = selectedItem - 5;
+  }
+}
+
 void gameSelectionUI() {
-  display.fillRect(0, 10, SCREEN_WIDTH, SCREEN_HEIGHT, SSD1306_BLACK);  // Clear area for dynamic text
+  display.fillRect(0, 0, 100, SCREEN_HEIGHT, SSD1306_BLACK);  // Clear area for dynamic text
   display.setTextSize(1);
-  display.setCursor(0, 15);
-  display.print("Game Selection");
-  display.setCursor(0, 25);
-  display.print("1. Dino");
-  display.setCursor(0, 35);
-  display.print("2. Ball");
-  display.setCursor(0, 45);
-  display.print("3. Exit");
+  display.setTextColor(SSD1306_WHITE);
+
+  for (int i = 0; i < 6; i++) {
+    int index = topItem + i;
+    if (index >= menuSize) break;
+
+    display.setCursor(0, i * 10);
+    if (index == selectedItem) {
+      display.print("> ");
+    } else {
+      display.print("  ");
+    }
+    display.println(menuItems[index]);
+  }
   display.display();
 }
 
@@ -636,12 +776,12 @@ void compassCheck() {
         last5yprYaws[0] = (int)ypr.yaw;
         last5yprYawsTime[0] = millis();
         quaternionToEulerRV(&sensorValue.un.arvrStabilizedRV, &ypr, true);
-        Serial.print("yaw: ");
-        Serial.print(ypr.yaw);
-        Serial.print(", pitch: ");
-        Serial.print(ypr.pitch);
-        Serial.print(", roll: ");
-        Serial.println(ypr.roll);
+        // Serial.print("yaw: ");
+        // Serial.print(ypr.yaw);
+        // Serial.print(", pitch: ");
+        // Serial.print(ypr.pitch);
+        // Serial.print(", roll: ");
+        // Serial.println(ypr.roll);
         break;
       default:
         Serial.println("default");
@@ -698,9 +838,9 @@ void everySecondLoop(void* parameter) {
 
     // Get state of charge (SOC)
     int soc = max17048.cellPercent();
-    Serial.print("State of Charge: ");
-    Serial.print(soc);
-    Serial.println(" %");
+    // Serial.print("State of Charge: ");
+    // Serial.print(soc);
+    // Serial.println(" %");
     soc = map(soc, 0, 100, -8, 105);
     if (soc > 100) {
       soc = 100;
@@ -710,14 +850,12 @@ void everySecondLoop(void* parameter) {
     }
 
     if (isDisplayConnected) {
-      if (soc != batteryPercentage) {
-        display.fillRect(103, 0, SCREEN_WIDTH, 10, SSD1306_BLACK);  // Clear area for dynamic text
-        display.setTextSize(1);
-        display.setCursor(103, 3);
-        display.print(soc);
-        display.print("%");
-        display.display();
-      }
+      display.fillRect(103, 0, SCREEN_WIDTH, 10, SSD1306_BLACK);  // Clear area for dynamic text
+      display.setTextSize(1);
+      display.setCursor(103, 3);
+      display.print(soc);
+      display.print("%");
+      display.display();
     }
     batteryPercentage = soc;
 
@@ -834,22 +972,22 @@ void connectedToRoviProcedure() {
 void vibrationMotorsTaskMethod(void* parameter) {
   vibrationMotorsTaskParameters* params = (vibrationMotorsTaskParameters*)parameter;
   if (params->vMotor1) {
-    analogWrite(VMOTOR1, 10);
+    ledcWrite(VMOTOR1_CHANNEL, 30);
   }
   if (params->vMotor2) {
-    analogWrite(VMOTOR2, 10);
+    ledcWrite(VMOTOR2_CHANNEL, 30);
   }
   if (params->vMotor3) {
-    analogWrite(VMOTOR3, 10);
+    ledcWrite(VMOTOR3_CHANNEL, 30);
   }
   if (params->vMotor4) {
-    analogWrite(VMOTOR4, 10);
+    ledcWrite(VMOTOR4_CHANNEL, 30);
   }
   vTaskDelay(params->duration / portTICK_PERIOD_MS);
-  analogWrite(VMOTOR1, 0);
-  analogWrite(VMOTOR2, 0);
-  analogWrite(VMOTOR3, 0);
-  analogWrite(VMOTOR4, 0);
+  ledcWrite(VMOTOR1_CHANNEL, 0);
+  ledcWrite(VMOTOR2_CHANNEL, 0);
+  ledcWrite(VMOTOR3_CHANNEL, 0);
+  ledcWrite(VMOTOR4_CHANNEL, 0);
   vTaskDelete(NULL);
 }
 
@@ -882,7 +1020,7 @@ void sendJoystickData() {
   } else {
     dataToSend += "n,";
   }
-  if (myJoysticksAxisEnabled.Rz && myJoysticksState.Rz != myJoysticksLastState.Rz) {
+  if (myJoysticksAxisEnabled.Rz && myJoysticksLastState.Rz == 0) { // myJoysticksLastState.Rz == 0 so that it only sends signal when it's pressed down
     dataToSend += String(myJoysticksState.Rz) + ",";
     send = true;
   } else {
@@ -914,19 +1052,19 @@ void sendJoystickData() {
   } else {
     dataToSend += "n,";
   }
-  if (myJoysticksAxisEnabled.Lz && myJoysticksState.Lz != myJoysticksLastState.Lz) {
-    dataToSend += String(myJoysticksState.Lz) + ",";
+  if (myJoysticksAxisEnabled.Lz && myJoysticksLastState.Lz == 0) { // myJoysticksLastState.Lz == 0 so that it only sends signal when it's pressed down
+    dataToSend += String(myJoysticksState.Lz);
     send = true;
   } else {
-    dataToSend += "n,";
+    dataToSend += "n";
   }
   if (send && isConnectedToRovi) {
     if (isConnectedToWebSocket) webSocket.sendTXT(dataToSend);
     // Serial.println(dataToSend);
   }
-  // if(send){
-  //   Serial.println(dataToSend);
-  // }
+  if(send){
+    Serial.println(dataToSend);
+  }
 }
 
 void updateJoysticks() {
@@ -951,32 +1089,32 @@ void updateJoysticks() {
 
   if (myJoysticksState.Rx > 2000) {
     myJoysticksState.Rx = (myJoysticksState.Rx > 3600) ? -255 : map(myJoysticksState.Rx, 2000, 3600, -10, -255);
-  } else if (myJoysticksState.Rx < 1800) {
-    myJoysticksState.Rx = (myJoysticksState.Rx < 410) ? 255 : map(myJoysticksState.Rx, 1800, 400, 10, 255);
+  } else if (myJoysticksState.Rx < 1750) {
+    myJoysticksState.Rx = (myJoysticksState.Rx < 400) ? 255 : map(myJoysticksState.Rx, 1750, 400, 10, 255);
   } else {
     myJoysticksState.Rx = 0;
   }
 
   if (myJoysticksState.Ry > 2000) {
     myJoysticksState.Ry = (myJoysticksState.Ry > 3600) ? -255 : map(pow(myJoysticksState.Ry / 10, 2) / 100, 400, 1296, -10, -255);
-  } else if (myJoysticksState.Ry < 1800) {
-    myJoysticksState.Ry = (myJoysticksState.Ry < 410) ? 255 : map(pow(map(myJoysticksState.Ry, 1800, 400, 200, 360), 2) / 100, 400, 1296, 10, 255);  // pow(map(myJoysticksState.Ry, 1800, 400, 200, 360), 2)/100, 400, 1296, -10, -255
+  } else if (myJoysticksState.Ry < 1750) {
+    myJoysticksState.Ry = (myJoysticksState.Ry < 400) ? 255 : map(pow(map(myJoysticksState.Ry, 1750, 400, 200, 360), 2) / 100, 400, 1296, 10, 255);  // pow(map(myJoysticksState.Ry, 1800, 400, 200, 360), 2)/100, 400, 1296, -10, -255
   } else {
     myJoysticksState.Ry = 0;
   }
 
   if (myJoysticksState.Lx > 2050) {
     myJoysticksState.Lx = (myJoysticksState.Lx > 3600) ? -255 : map(myJoysticksState.Lx, 2050, 3600, -10, -255);
-  } else if (myJoysticksState.Lx < 1800) {
-    myJoysticksState.Lx = (myJoysticksState.Lx < 410) ? 255 : map(myJoysticksState.Lx, 1800, 400, 10, 255);
+  } else if (myJoysticksState.Lx < 1750) {
+    myJoysticksState.Lx = (myJoysticksState.Lx < 400) ? 255 : map(myJoysticksState.Lx, 1750, 400, 10, 255);
   } else {
     myJoysticksState.Lx = 0;
   }
 
   if (myJoysticksState.Ly > 2000) {
     myJoysticksState.Ly = (myJoysticksState.Ly > 3600) ? -255 : map(pow(myJoysticksState.Ly / 10, 2) / 100, 400, 1296, -10, -255);  // map(myJoysticksState.Ly, 2000, 3600, 10, 255)
-  } else if (myJoysticksState.Ly < 1800) {
-    myJoysticksState.Ly = (myJoysticksState.Ly < 410) ? 255 : map(pow(map(myJoysticksState.Ly, 1800, 400, 200, 360), 2) / 100, 400, 1296, 10, 255);  // map(myJoysticksState.Ly, 1800, 400, -10, -255)
+  } else if (myJoysticksState.Ly < 1750) {
+    myJoysticksState.Ly = (myJoysticksState.Ly < 400) ? 255 : map(pow(map(myJoysticksState.Ly, 1750, 400, 200, 360), 2) / 100, 400, 1296, 10, 255);  // map(myJoysticksState.Ly, 1800, 400, -10, -255)
   } else {
     myJoysticksState.Ly = 0;
   }
@@ -1101,4 +1239,165 @@ void gyroGameLoop() {
 
   // Update display
   display.display();
+}
+
+void playImperialMarch(void* parameter) {
+
+  for (int i = 0; i < sizeof(melody) / sizeof(melody[0]); i++) {
+    int noteFrequency = melody[i];
+    int noteDuration = noteDurations[i];
+
+    if (noteFrequency > 0) {
+      ledcWriteTone(SPEAKERL_CHANNEL, noteFrequency);
+      ledcWriteTone(SPEAKERR_CHANNEL, noteFrequency);
+      ledcWrite(SPEAKERL_CHANNEL, 100);
+      ledcWrite(SPEAKERR_CHANNEL, 100);
+    } else {
+      ledcWriteTone(SPEAKERL_CHANNEL, 0);
+      ledcWriteTone(SPEAKERR_CHANNEL, 0);
+    }
+
+    delay(noteDuration);
+
+    // Short silence between notes
+    ledcWriteTone(SPEAKERL_CHANNEL, 0);
+    ledcWriteTone(SPEAKERR_CHANNEL, 0);
+    delay(noteDuration * 0.3);
+  }
+  vTaskDelete(NULL);
+}
+
+void playFuturisticSound(void* parameter) {
+  // ------------------------------
+  // Lightsaber Power-Up Effect (1.5s)
+  // ------------------------------
+  const unsigned long ignitionDuration = 1500;  // 1.5 seconds
+  unsigned long startTime = millis();
+  float vibrationPower = 5;
+
+  while (millis() - startTime < ignitionDuration) {
+    float t = (millis() - startTime) / (float)ignitionDuration;  // t goes from 0 to 1
+
+    // **Lightsaber ignition sound curve**
+    int freq = 100 + (8000 * pow(t, 2.5));  // Starts at 100 Hz, surges up, then stabilizes
+    if (freq > 3000) freq = 3000;           // Cap max frequency
+
+    // Apply a subtle oscillation effect for "energy surge"
+    // freq += 50 * sin(millis() * 0.01);  // Small modulation for realism
+
+    // Vibration motor follows the same intensity curve
+    int vibrationPower = (int)(255 * (1.0 - pow(t, 1.2)));  // Fades out slightly
+
+    // Vibration frequency modulation (adds energy effect)
+    int vibFreq = 50 + (150 * pow(t, 0.8));  // Starts low, surges up
+    if (vibFreq > 200) vibFreq = 200;
+
+    // Update sound frequency
+    ledcWriteTone(SPEAKERL_CHANNEL, freq);
+    ledcWriteTone(SPEAKERR_CHANNEL, freq);
+    ledcWrite(SPEAKERL_CHANNEL, 10);
+    ledcWrite(SPEAKERR_CHANNEL, 10);
+
+    delay(1 + round(t * 9));
+    ledcWrite(VMOTOR1_CHANNEL, vibrationPower);
+    vibrationPower += 0.2;
+    delay(9 - round(t * 9));
+    ledcWrite(VMOTOR1_CHANNEL, 0);
+
+    // Update vibration motor (frequency & intensity)
+    // ledcWrite(VMOTOR1_CHANNEL, vibrationPower);
+
+    // ------------------------
+    // Time-based control for vibration motor
+    // ------------------------
+    // unsigned long currentMillis = millis();
+    // if (currentMillis - previousMillis >= onDuration + offDuration) {
+    //   previousMillis = currentMillis;
+
+    //   if (t < 1.0) {
+    //     ledcWrite(VMOTOR1_CHANNEL, vibrationPower);
+    //   } else {
+    //     ledcWrite(VMOTOR1_CHANNEL, 0);
+    //   }
+    // }
+
+    // delay(10);  // Short delay for smooth transitions
+  }
+
+  // **Steady hum after ignition**
+  // ledcWriteTone(SPEAKERL_CHANNEL, 250);
+  // ledcWriteTone(SPEAKERR_CHANNEL, 250);
+  // // ledcWrite(VMOTOR1_CHANNEL, 80);  // Low steady vibration
+
+  // delay(2000);  // Keep it humming for a bit
+
+  // Turn off sound and vibration after hum
+  ledcWriteTone(SPEAKERL_CHANNEL, 0);
+  ledcWriteTone(SPEAKERR_CHANNEL, 0);
+  // ledcWrite(VMOTOR1_CHANNEL, 0);
+  vTaskDelete(NULL);
+
+
+
+
+
+  // const unsigned long dropDuration = 2000;  // 1 second
+  // unsigned long startTime = millis();
+  // float ddd = 5;
+
+  // while (millis() - startTime < dropDuration) {
+  //   // Calculate normalized time (t goes from 0.0 to 1.0)
+  //   float t = (millis() - startTime) / (float)dropDuration;
+
+  //   int freq = 100 + (10000 - 100) * (1 - exp(-5.0 * pow(t, 1.5)));
+
+  //   // Ensure it doesn't drop below 100 Hz
+
+  //   // Update both channels with the computed frequency and full amplitude (255)
+  //   ledcWriteTone(SPEAKERL_CHANNEL, freq);
+  //   ledcWriteTone(SPEAKERR_CHANNEL, freq);
+
+  //   ledcWrite(SPEAKERL_CHANNEL, 100);
+  //   ledcWrite(SPEAKERR_CHANNEL, 100);
+
+  //   // ledcWriteTone(2, 10000-freq);  // Adjust frequency
+  //   delay(1 + round(t * 9));
+  //   ledcWrite(VMOTOR1_CHANNEL, ddd);
+  //   ddd += 0.2;
+  //   delay(9 - round(t * 9));
+  //   ledcWrite(VMOTOR1_CHANNEL, 0);
+  // }
+  // ledcWrite(VMOTOR1_CHANNEL, 0);
+
+  // ledcWriteTone(SPEAKERL_CHANNEL, 0);
+  // ledcWriteTone(SPEAKERR_CHANNEL, 0);
+  // vTaskDelete(NULL);
+}
+
+void saySomeWords(void* parameter) {
+  text2speech.setPitch(6);
+  // text2speech.sayText("Victory at all costs, victory in spite of all terror.");
+  // delay(500);
+  text2speech.sayText("Hello, try speaking. Very cool. Ha ha ha!");
+  // delay(500);
+  // text2speech.sayText("for without victory, there is no survival");
+  // text2speech.sayText("Hello  master! How are you doin?");
+
+  vTaskDelete(NULL);
+}
+
+void drawHappyFace() {
+  // Head (circle)
+  display.drawCircle(64, 32, 20, SSD1306_WHITE);
+
+  // Eyes (small circles)
+  display.fillCircle(57, 27, 2, SSD1306_WHITE);
+  display.fillCircle(71, 27, 2, SSD1306_WHITE);
+
+  // Smile (arc)
+  // display.drawArc(64, 34, 10, 10, 20, 160, SSD1306_WHITE);
+  for (int x = -6; x <= 6; x++) {
+    int y = sqrt(9 - x * x);  // Equation of a circle segment
+    display.drawPixel(64 + x, 38 + y, SSD1306_WHITE);
+  }
 }
