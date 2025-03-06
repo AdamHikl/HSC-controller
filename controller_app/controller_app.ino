@@ -884,18 +884,6 @@ void everyTenSecondsLoop(void* parameter) {
     Serial.println("start 10s loop");
     int delayTime = 10000;
     if (WiFi.status() != WL_CONNECTED) {
-      int n = WiFi.scanNetworks();  // Scan for available networks
-      for (int i = 0; i < n; i++) {
-        // Print found networks
-        Serial.printf("SSID: %s, RSSI: %d\n", WiFi.SSID(i).c_str(), WiFi.RSSI(i));
-        // Check if the SSID matches
-        if (WiFi.SSID(i) == ssid) {
-          Serial.println("Matching SSID found. Connecting...");
-        }
-      }
-      if (n == 0) {
-        Serial.println("No wifi detected");
-      }
       WiFi.begin(ssid, password);
       vTaskDelay(1000 / portTICK_PERIOD_MS);
       delayTime -= 1000;
@@ -913,9 +901,7 @@ void everyTenSecondsLoop(void* parameter) {
       } else {
         Serial.println("WiFi 0");
       }
-      // Clean up after scanning
-      WiFi.scanDelete();
-      Serial.println("deleting scan");
+      
     } else {
       if (!connectedToWiFiRovi) {
         connectedToRoviProcedure();
