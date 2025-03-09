@@ -1049,7 +1049,7 @@ void sendJoystickData() {
     // Serial.println(dataToSend);
   }
   if(send){
-    Serial.println(dataToSend);
+    // Serial.println(dataToSend);
   }
 }
 
@@ -1073,34 +1073,39 @@ void updateJoysticks() {
   // myJoysticksState.Ly = map(analogRead(LJY_PIN), 0, 4095, -255, 255);
   myJoysticksState.Lz = digitalRead(LJZ_PIN);
 
-  if (myJoysticksState.Rx > 2000) {
-    myJoysticksState.Rx = (myJoysticksState.Rx > 3600) ? -255 : map(myJoysticksState.Rx, 2000, 3600, -10, -255);
-  } else if (myJoysticksState.Rx < 1750) {
-    myJoysticksState.Rx = (myJoysticksState.Rx < 400) ? 255 : map(myJoysticksState.Rx, 1750, 400, 10, 255);
+  
+  Serial.println(myJoysticksState.Ly);
+  if (myJoysticksState.Rx > 1780) {
+    myJoysticksState.Rx = (myJoysticksState.Rx > 3650) ? -255 : map(myJoysticksState.Rx, 2000, 3600, -10, -255);
+  } else if (myJoysticksState.Rx < 1620) {
+    myJoysticksState.Rx = (myJoysticksState.Rx < 300) ? 255 : map(myJoysticksState.Rx, 1750, 400, 10, 255);
   } else {
     myJoysticksState.Rx = 0;
   }
 
-  if (myJoysticksState.Ry > 2000) {
-    myJoysticksState.Ry = (myJoysticksState.Ry > 3600) ? -255 : map(pow(myJoysticksState.Ry / 10, 2) / 100, 400, 1296, -10, -255);
-  } else if (myJoysticksState.Ry < 1750) {
-    myJoysticksState.Ry = (myJoysticksState.Ry < 400) ? 255 : map(pow(map(myJoysticksState.Ry, 1750, 400, 200, 360), 2) / 100, 400, 1296, 10, 255);  // pow(map(myJoysticksState.Ry, 1800, 400, 200, 360), 2)/100, 400, 1296, -10, -255
+  if (myJoysticksState.Ry > 1780) {
+    // Serial.println(pow((myJoysticksState.Ry / 10), 2) / 100);
+    myJoysticksState.Ry = (myJoysticksState.Ry > 3650) ? -255 : map(pow((myJoysticksState.Ry / 10), 2) / 100, 320, 1370, -10, -255);
+  } else if (myJoysticksState.Ry < 1620) {
+    // Serial.println(map(myJoysticksState.Ry, 1620, 300, 10, 255));
+    // Serial.println(pow(map(myJoysticksState.Ry, 1620, 300, 178, 365), 4) / 10000000, 100, 1900, 10, 255));
+    myJoysticksState.Ry = (myJoysticksState.Ry < 300) ? 255 : map(pow(map(myJoysticksState.Ry, 1620, 300, 178, 365), 2) / 100, 320, 1370, 10, 255);  // pow(map(myJoysticksState.Ry, 1800, 400, 200, 360), 2)/100, 400, 1296, -10, -255
   } else {
     myJoysticksState.Ry = 0;
   }
 
-  if (myJoysticksState.Lx > 2050) {
-    myJoysticksState.Lx = (myJoysticksState.Lx > 3600) ? -255 : map(myJoysticksState.Lx, 2050, 3600, -10, -255);
-  } else if (myJoysticksState.Lx < 1750) {
-    myJoysticksState.Lx = (myJoysticksState.Lx < 400) ? 255 : map(myJoysticksState.Lx, 1750, 400, 10, 255);
+  if (myJoysticksState.Lx > 1780) {
+    myJoysticksState.Lx = (myJoysticksState.Lx > 3650) ? -255 : map(myJoysticksState.Lx, 2050, 3600, -10, -255);
+  } else if (myJoysticksState.Lx < 1620) {
+    myJoysticksState.Lx = (myJoysticksState.Lx < 300) ? 255 : map(myJoysticksState.Lx, 1750, 400, 10, 255);
   } else {
     myJoysticksState.Lx = 0;
   }
 
-  if (myJoysticksState.Ly > 2000) {
-    myJoysticksState.Ly = (myJoysticksState.Ly > 3600) ? -255 : map(pow(myJoysticksState.Ly / 10, 2) / 100, 400, 1296, -10, -255);  // map(myJoysticksState.Ly, 2000, 3600, 10, 255)
+  if (myJoysticksState.Ly > 1880) {
+    myJoysticksState.Ly = (myJoysticksState.Ly > 3650) ? -255 : map(pow(myJoysticksState.Ly / 10, 2) / 100, 350, 1370, -10, -255);  // map(myJoysticksState.Ly, 2000, 3600, 10, 255)
   } else if (myJoysticksState.Ly < 1750) {
-    myJoysticksState.Ly = (myJoysticksState.Ly < 400) ? 255 : map(pow(map(myJoysticksState.Ly, 1750, 400, 200, 360), 2) / 100, 400, 1296, 10, 255);  // map(myJoysticksState.Ly, 1800, 400, -10, -255)
+    myJoysticksState.Ly = (myJoysticksState.Ly < 300) ? 255 : map(pow(map(myJoysticksState.Ly, 1750, 300, 188, 365), 2) / 100, 350, 1370, 10, 255);  // map(myJoysticksState.Ly, 1800, 400, -10, -255)
   } else {
     myJoysticksState.Ly = 0;
   }
