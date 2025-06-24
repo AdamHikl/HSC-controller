@@ -9,7 +9,6 @@
 #include <Adafruit_SSD1306.h>   // display
 #include <Adafruit_MAX1704X.h>  // battery fuel gauge
 #include <Adafruit_BNO08x.h>    // IMU
-#include <TTS.h>                // text to speech library
 
 #define SDA_PIN 21
 #define SCL_PIN 22
@@ -49,10 +48,9 @@ struct euler_t {
   float yaw;
   float pitch;
   float roll;
-} ypr, yprStart, yprRequired;
+} ypr;
 int last5yprYaws[5];
 unsigned long last5yprYawsTime[5];
-int yawCorrection = 0;
 Adafruit_BNO08x bno08x(BNO08X_RESET);
 sh2_SensorValue_t sensorValue;
 sh2_SensorId_t reportType = SH2_ARVR_STABILIZED_RV;
@@ -65,8 +63,6 @@ TaskHandle_t taskCompassCheck;
 // MUSIC
 #define SPEAKER_LEFT 25
 #define SPEAKER_RIGHT 26
-
-TTS text2speech(SPEAKER_LEFT);  // to enable both speakers, you need to go to the sound.cpp file in TTS library and adjust the code - I will video tutorial soon
 
 TaskHandle_t playImperialMarchTask;
 TaskHandle_t playFuturisticSoundTask;
@@ -1073,8 +1069,9 @@ void updateJoysticks() {
   // myJoysticksState.Ly = map(analogRead(LJY_PIN), 0, 4095, -255, 255);
   myJoysticksState.Lz = digitalRead(LJZ_PIN);
 
+  Serial.println(myJoysticksState.Ry);
   
-  Serial.println(myJoysticksState.Ly);
+  // Serial.println(myJoysticksState.Ly);
   if (myJoysticksState.Rx > 1780) {
     myJoysticksState.Rx = (myJoysticksState.Rx > 3650) ? -255 : map(myJoysticksState.Rx, 2000, 3600, -10, -255);
   } else if (myJoysticksState.Rx < 1620) {
@@ -1363,18 +1360,6 @@ void playFuturisticSound(void* parameter) {
   // ledcWriteTone(SPEAKERL_CHANNEL, 0);
   // ledcWriteTone(SPEAKERR_CHANNEL, 0);
   // vTaskDelete(NULL);
-}
-
-void saySomeWords(void* parameter) {
-  text2speech.setPitch(6);
-  // text2speech.sayText("Victory at all costs, victory in spite of all terror.");
-  // delay(500);
-  text2speech.sayText("Hello, try speaking. Very cool. Ha ha ha!");
-  // delay(500);
-  // text2speech.sayText("for without victory, there is no survival");
-  // text2speech.sayText("Hello  master! How are you doin?");
-
-  vTaskDelete(NULL);
 }
 
 void drawHappyFace() {
